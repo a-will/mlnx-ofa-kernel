@@ -1,0 +1,161 @@
+From 2ef8a4ebf6880e200cbbce6da45fad4e3405c27f Mon Sep 17 00:00:00 2001
+From: Alex Williams <williams.a@berkeley.edu>
+Date: Fri, 16 Nov 2018 13:03:42 -0800
+Subject: [PATCH] Fixup for API changes in 4.18
+
+---
+ drivers/infiniband/hw/mlx4/main.c                   | 21 ++++++---------------
+ drivers/infiniband/hw/mlx5/main.c                   |  6 ++----
+ .../infiniband/ulp/ipoib/rss_tss/ipoib_main_rss.c   |  6 +++++-
+ drivers/net/ethernet/mellanox/mlx4/en_tx.c          |  6 +++++-
+ drivers/net/ethernet/mellanox/mlx4/main.c           |  2 +-
+ drivers/net/ethernet/mellanox/mlx5/core/en_main.c   |  2 +-
+ drivers/net/ethernet/mellanox/mlx5/core/uar.c       |  2 +-
+ 7 files changed, 21 insertions(+), 24 deletions(-)
+
+diff --git a/drivers/infiniband/hw/mlx4/main.c b/drivers/infiniband/hw/mlx4/main.c
+index 3d5704d..ca2de15 100644
+--- a/drivers/infiniband/hw/mlx4/main.c
++++ b/drivers/infiniband/hw/mlx4/main.c
+@@ -1210,7 +1210,6 @@ static const struct vm_operations_struct mlx4_ib_vm_ops = {
+ static void mlx4_ib_disassociate_ucontext(struct ib_ucontext *ibcontext)
+ {
+ 	int i;
+-	int ret = 0;
+ 	struct vm_area_struct *vma;
+ 	struct mlx4_ib_ucontext *context = to_mucontext(ibcontext);
+ 	struct task_struct *owning_process  = NULL;
+@@ -1253,13 +1252,9 @@ static void mlx4_ib_disassociate_ucontext(struct ib_ucontext *ibcontext)
+ 		if (!vma)
+ 			continue;
+ 
+-		ret = zap_vma_ptes(context->hw_bar_info[i].vma,
+-				   context->hw_bar_info[i].vma->vm_start,
+-				   PAGE_SIZE);
+-		if (ret) {
+-			pr_err("Error: zap_vma_ptes failed for index=%d, ret=%d\n", i, ret);
+-			BUG_ON(1);
+-		}
++		zap_vma_ptes(context->hw_bar_info[i].vma,
++			     context->hw_bar_info[i].vma->vm_start,
++			     PAGE_SIZE);
+ 
+ 		context->hw_bar_info[i].vma->vm_flags &=
+ 			~(VM_SHARED | VM_MAYSHARE);
+@@ -1273,13 +1268,9 @@ static void mlx4_ib_disassociate_ucontext(struct ib_ucontext *ibcontext)
+ 			if (!vma)
+ 				continue;
+ 
+-			ret = zap_vma_ptes(uar->hw_bar_info[i].vma,
+-					   uar->hw_bar_info[i].vma->vm_start,
+-					   PAGE_SIZE);
+-			if (ret) {
+-				pr_err("Error: zap_vma_ptes failed for uar_idx=%d, index=%d, ret=%d\n", uar->user_idx, i, ret);
+-				BUG_ON(1);
+-			}
++			zap_vma_ptes(uar->hw_bar_info[i].vma,
++				     uar->hw_bar_info[i].vma->vm_start,
++				     PAGE_SIZE);
+ 
+ 			/* context going to be destroyed, should not access ops any more */
+ 			uar->hw_bar_info[i].vma->vm_ops = NULL;
+diff --git a/drivers/infiniband/hw/mlx5/main.c b/drivers/infiniband/hw/mlx5/main.c
+index bcbe5d4..74c566c 100644
+--- a/drivers/infiniband/hw/mlx5/main.c
++++ b/drivers/infiniband/hw/mlx5/main.c
+@@ -1810,7 +1810,6 @@ void mlx5_ib_set_vma_data(struct vm_area_struct *vma,
+ #if defined(HAVE_PUT_TASK_STRUCT_EXPORTED) && defined (HAVE_GET_TASK_PID_EXPORTED) && defined(HAVE_GET_PID_TASK_EXPORTED)
+ static void mlx5_ib_disassociate_ucontext(struct ib_ucontext *ibcontext)
+ {
+-	int ret;
+ 	struct vm_area_struct *vma;
+ 	struct mlx5_ib_vma_private_data *vma_private, *n;
+ 	struct mlx5_ib_ucontext *context = to_mucontext(ibcontext);
+@@ -1850,9 +1849,8 @@ static void mlx5_ib_disassociate_ucontext(struct ib_ucontext *ibcontext)
+ 	list_for_each_entry_safe(vma_private, n, &context->vma_private_list,
+ 				 list) {
+ 		vma = vma_private->vma;
+-		ret = zap_vma_ptes(vma, vma->vm_start,
+-				   PAGE_SIZE);
+-		WARN_ONCE(ret, "%s: zap_vma_ptes failed", __func__);
++		zap_vma_ptes(vma, vma->vm_start,
++			     PAGE_SIZE);
+ 		/* context going to be destroyed, should
+ 		 * not access ops any more.
+ 		 */
+diff --git a/drivers/infiniband/ulp/ipoib/rss_tss/ipoib_main_rss.c b/drivers/infiniband/ulp/ipoib/rss_tss/ipoib_main_rss.c
+index 7b24fe0..eb11270 100644
+--- a/drivers/infiniband/ulp/ipoib/rss_tss/ipoib_main_rss.c
++++ b/drivers/infiniband/ulp/ipoib/rss_tss/ipoib_main_rss.c
+@@ -146,7 +146,11 @@ static u16 ipoib_select_queue_sw_rss(struct net_device *dev, struct sk_buff *skb
+ #ifdef CONFIG_COMPAT_IS___SKB_TX_HASH
+ 	return __skb_tx_hash(dev, skb, priv->tss_qp_num);
+ #else
+-	return skb_tx_hash(dev, skb);
++#ifdef HAVE_SELECT_QUEUE_FALLBACK_T
++	return fallback(dev, skb);
++#else
++	return skb_get_hash(dev, skb);
++#endif
+ #endif
+ }
+ 
+diff --git a/drivers/net/ethernet/mellanox/mlx4/en_tx.c b/drivers/net/ethernet/mellanox/mlx4/en_tx.c
+index ce7905c..01401f5 100644
+--- a/drivers/net/ethernet/mellanox/mlx4/en_tx.c
++++ b/drivers/net/ethernet/mellanox/mlx4/en_tx.c
+@@ -746,7 +746,11 @@ u16 mlx4_en_select_queue(struct net_device *dev, struct sk_buff *skb)
+ 	u16 rings_p_up = priv->num_tx_rings_p_up;
+ 
+ 	if (netdev_get_num_tc(dev))
+-		return skb_tx_hash(dev, skb);
++#ifdef HAVE_SELECT_QUEUE_FALLBACK_T
++		return fallback(dev, skb);
++#else
++		return __netdev_pick_tx(dev, skb);
++#endif
+ 
+ #ifdef HAVE_SELECT_QUEUE_FALLBACK_T
+ 	return fallback(dev, skb) % rings_p_up;
+diff --git a/drivers/net/ethernet/mellanox/mlx4/main.c b/drivers/net/ethernet/mellanox/mlx4/main.c
+index 68555e6..b4d0db0 100644
+--- a/drivers/net/ethernet/mellanox/mlx4/main.c
++++ b/drivers/net/ethernet/mellanox/mlx4/main.c
+@@ -1287,7 +1287,7 @@ static void mlx4_check_pcie_caps(struct mlx4_dev *dev)
+ 		return;
+ 	}
+ 
+-	err = pcie_get_minimum_link(dev->persist->pdev, &speed, &width);
++	err = pcie_bandwidth_available(dev->persist->pdev, NULL, &speed, &width);
+ 	if (err || speed == PCI_SPEED_UNKNOWN ||
+ 	    width == PCIE_LNK_WIDTH_UNKNOWN) {
+ 		mlx4_warn(dev,
+diff --git a/drivers/net/ethernet/mellanox/mlx5/core/en_main.c b/drivers/net/ethernet/mellanox/mlx5/core/en_main.c
+index 06c6dab..66a5e1a 100644
+--- a/drivers/net/ethernet/mellanox/mlx5/core/en_main.c
++++ b/drivers/net/ethernet/mellanox/mlx5/core/en_main.c
+@@ -5407,7 +5407,7 @@ static int mlx5e_get_pci_bw(struct mlx5_core_dev *mdev, u32 *pci_bw)
+ 	enum pci_bus_speed speed;
+ 	int err = 0;
+ 
+-	err = pcie_get_minimum_link(mdev->pdev, &speed, &width);
++	err = pcie_bandwidth_available(mdev->pdev, NULL, &speed, &width);
+ 	if (err)
+ 		return err;
+ 
+diff --git a/drivers/net/ethernet/mellanox/mlx5/core/uar.c b/drivers/net/ethernet/mellanox/mlx5/core/uar.c
+index da19eb1..00d3db4 100644
+--- a/drivers/net/ethernet/mellanox/mlx5/core/uar.c
++++ b/drivers/net/ethernet/mellanox/mlx5/core/uar.c
+@@ -391,7 +391,7 @@ void mlx5_pcie_print_link_status(struct mlx5_core_dev *dev)
+ 	if (mlx5_get_pcie_dev_link_caps(dev->pdev, &speed_cap, &width_cap))
+ 		return;
+ 
+-	err = pcie_get_minimum_link(dev->pdev, &speed, &width);
++	err = pcie_bandwidth_available(dev->pdev, NULL, &speed, &width);
+ 	if (err || speed == PCI_SPEED_UNKNOWN ||
+ 	    width == PCIE_LNK_WIDTH_UNKNOWN)
+ 		return;
+-- 
+2.14.5
+
