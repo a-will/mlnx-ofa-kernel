@@ -1,0 +1,25 @@
+From e2447174d3187e10a9bcf7c5f0924c66c52e8197 Mon Sep 17 00:00:00 2001
+From: Alex Williams <williams.a@berkeley.edu>
+Date: Fri, 16 Nov 2018 13:12:49 -0800
+Subject: [PATCH] Fixup for API changes in kernel 4.17
+
+---
+ drivers/infiniband/core/cma.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/infiniband/core/cma.c b/drivers/infiniband/core/cma.c
+index a7aff3b..afcad0d 100644
+--- a/drivers/infiniband/core/cma.c
++++ b/drivers/infiniband/core/cma.c
+@@ -1312,7 +1312,7 @@ static bool validate_ipv6_net_dev(struct net_device *net_dev,
+ 			   IPV6_ADDR_LINKLOCAL;
+ 	struct rt6_info *rt = rt6_lookup(dev_net(net_dev), &dst_addr->sin6_addr,
+ 					 &src_addr->sin6_addr, net_dev->ifindex,
+-					 strict);
++					 NULL, strict);
+ 	bool ret;
+ 
+ 	if (!rt)
+-- 
+2.14.5
+
